@@ -1,13 +1,10 @@
 import random
 from dataclasses import dataclass
-from typing import Tuple, Dict, List
+from typing import Tuple
 import pandas as pd
 import numpy as np
 import torch
 # Write a custom dataset class (inherits from torch.utils.data.Dataset)
-from torch.utils.data import Dataset
-
-
 from torch.utils.data import Dataset
 
 
@@ -59,15 +56,14 @@ class NIRSpectralData(Dataset):
 
 
 @dataclass
-class RamanDataGenerator():
+class NIRDataGenerator():
     df: pd.DataFrame  # dataframe with columns 0:-1 as spectra data with different wavelenghts and last column as class label
     batch_size: int  # number of samples per batch
     class_col_name: str  # name of the column containing the class label
-    max_classes: int  # number of classes
 
     weighted_sum: bool = True
     roll: bool = True
-    # number of shift (needs to be multiplied with nm resolution of the spectral data)
+    # number of shift (needs to be multiplied with nm resolution of the spectral data to obtain the real shift)
     roll_factor: int = 12
 
     slope: bool = True
@@ -83,6 +79,7 @@ class RamanDataGenerator():
         # transform to numpy for performance reasons
         self.samples = self.df.iloc[:, :-1].to_numpy().astype("float32")
         self.labels = self.df[self.class_col_name].to_numpy().astype("uint8")
+        self.columns = self.df.columns[:-1]
 
     def __len__(self):
         return int(len(self.df) // self.batch_size)
@@ -103,12 +100,48 @@ class RamanDataGenerator():
             # TODO: to implement
             pass
 
+        data = pd.DataFrame(batch_samples, columns=self.columns)
+        data['class'] = batch_labels
         return (
-            batch_samples,
-            batch_labels,
+            data
         )
 
-    def _augmentation(self, batch_samples, batch_labels):
+    def augment_all_once(self):
+        # selection of all data
+        data_len = len(self.df)
+        batch_samples = self.samples
+        batch_labels = self.labels.reshape((data_len, 1))
+        batch_samples = self._augmentation(
+            batch_samples, batch_labels, batch_size=data_len)
+        batch_labels = batch_labels.reshape((data_len,))
+
+        # in case of categorical crossentropy loss, labels are translated
+        # form sparse to categorical
+        if not self.sparse_labels:
+            # TODO: to implement
+            pass
+
+        data = pd.DataFrame(batch_samples, columns=self.columns)
+        data['class'] = batch_labels
+
+        return data
+
+    def augment_n_times(self, iterations: int = 10):
+
+        print(f"Augmenting {iterations} times...")
+        data_df_list = []
+
+        for _ in range(iterations):
+            data = self.augment_all_once()
+            data_df_list.append(data)
+
+        augmented_df = pd.concat(data_df_list)
+
+        print(f"Done!\nDataset is now composed of {len(augmented_df)} samples")
+
+        return augmented_df
+
+    def _augmentation(self, batch_samples, batch_labels, batch_size=None):
         """Compute data augmentation on 'batch_samples', applying 
         weighted sum + roll(horizontal shift) + baseline noise + adittive white gaussian noise
 
@@ -120,12 +153,17 @@ class RamanDataGenerator():
             np.array: Batch of augmented data
         """
 
+        if batch_size is None:
+            batch_size = self.batch_size
+        else:
+            batch_size = batch_size
+
         if self.weighted_sum:
-            alpha = np.random.rand(self.batch_size)
+            alpha = np.random.rand(batch_size)
 
             other_samples = np.apply_along_axis(
                 self._get_random_sample_from_class, 1, batch_labels
-            ).reshape(self.batch_size, batch_samples.shape[1])
+            ).reshape(batch_size, batch_samples.shape[1])
 
             if self.roll:
                 other_samples = np.apply_along_axis(
@@ -134,7 +172,7 @@ class RamanDataGenerator():
             batch_samples = (
                 np.multiply(
                     batch_samples -
-                    other_samples, alpha.reshape(self.batch_size, 1)
+                    other_samples, alpha.reshape(batch_size, 1)
                 )
                 + other_samples
             )
