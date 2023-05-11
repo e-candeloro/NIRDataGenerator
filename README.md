@@ -7,7 +7,9 @@ Based on the awesome work of [Francesco Olivato](https://github.com/fmolivato/Ra
 This project aims to offer a fast :zap: and reliable data augmentation generator of **NIR spectra**
 
 ## This project is currently a Work in Progress!
+
 To do:
+
 - [x] implement basic PyTorch support
 - [x] implement basic augments compatibility with PyTorch
 - [ ] Test on data and compare results
